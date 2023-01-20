@@ -1,0 +1,312 @@
+---
+title: "EDA and data visualization"
+author: "Monica Alexander"
+date: today
+date-format: "DD/MM/YY"
+format: 
+    pdf:
+      toc: true
+      number-sections: true
+---
+
+```{r}
+#| message: false
+library(opendatatoronto)
+library(tidyverse)
+library(stringr)
+library(skimr) # EDA
+library(visdat) # EDA
+library(janitor)
+library(lubridate)
+library(ggrepel)
+```
+
+# TTC subway delays
+
+This package provides an interface to all data available on the [Open Data Portal](https://open.toronto.ca/) provided by the City of Toronto.
+
+Use the `list_packages` function to look whats available look at what's available
+
+```{r}
+all_data <- list_packages(limit = 500)
+head(all_data)
+```
+
+Let's download the data on TTC subway delays in 2022.
+
+```{r}
+res <- list_package_resources("996cfe8d-fb35-40ce-b569-698d51fc683b") # obtained code from searching data frame above
+res <- res |> mutate(year = str_extract(name, "202.?"))
+delay_2022_ids <- res |> filter(year==2022) |> select(id) |> pull()
+
+delay_2022 <- get_resource(delay_2022_ids)
+
+# make the column names nicer to work with
+delay_2022 <- clean_names(delay_2022)
+```
+
+```{r}
+# note: I obtained these codes from the 'id' column in the `res` object above
+delay_codes <- get_resource("3900e649-f31e-4b79-9f20-4731bbfd94f7")
+delay_data_codebook <- get_resource("ca43ac3d-3940-4315-889b-a9375e7b8aa4")
+```
+
+```{r}
+head(delay_2022)
+```
+
+```{r}
+## Removing the observations that have non-standardized lines
+
+delay_2022 <- delay_2022 |> filter(line %in% c("BD", "YU", "SHP", "SRT"))
+
+```
+
+```{r}
+delay_2022 <- delay_2022 |> 
+  left_join(delay_codes |> rename(code = `SUB RMENU CODE`, code_desc = `CODE DESCRIPTION...3`) |> select(code, code_desc)) 
+
+
+delay_2022 <- delay_2022 |>
+  mutate(code_srt = ifelse(line=="SRT", code, "NA")) |> 
+  left_join(delay_codes |> rename(code_srt = `SRT RMENU CODE`, code_desc_srt = `CODE DESCRIPTION...7`) |> select(code_srt, code_desc_srt))  |> 
+  mutate(code = ifelse(code_srt=="NA", code, code_srt),
+         code_desc = ifelse(is.na(code_desc_srt), code_desc, code_desc_srt)) |> 
+  select(-code_srt, -code_desc_srt)
+```
+
+```{r}
+delay_2022 <- delay_2022 |> 
+  mutate(station_clean = ifelse(str_starts(station, "ST"), word(station, 1,2), word(station, 1)))
+```
+
+# Lab Exercises
+
+To be handed in via submission of quarto file (and rendered pdf) to GitHub.
+
+1.  Using the `delay_2022` data, plot the five stations with the highest mean delays. Facet the graph by `line`
+
+```{r}
+delay_2022 |>
+  group_by(line, station_clean) |>
+  summarise(mean_delay = mean(min_delay)) |>
+  arrange(-mean_delay) |>
+  slice(1:5) |>
+  ggplot(aes(x = station_clean,
+             y = mean_delay)) +
+  geom_col() + 
+  facet_wrap(vars(line), 
+             scales = "free_y",
+             nrow = 4) +
+  coord_flip()
+```
+
+2.  Using the `opendatatoronto` package, download the data on mayoral campaign contributions for 2014. Hints:
+
+    -   find the ID code you need for the package you need by searching for 'campaign' in the `all_data` tibble above
+    -   you will then need to `list_package_resources` to get ID for the data file
+    -   note: the 2014 file you will get from `get_resource` has a bunch of different campaign contributions, so just keep the data that relates to the Mayor election
+
+    ```{r}
+    res <- list_package_resources("f6651a40-2f52-46fc-9e04-b760c16edd5c") # obtained code from searching data frame above
+    res_data <-get_resource("5b230e92-0a22-4a15-9572-0b19cc222985")
+    res_readme <-get_resource("aaf736f4-7468-4bda-9a66-4bb592e9c63c")
+    data<-res_data[["2_Mayor_Contributions_2014_election.xls"]]
+    ```
+
+3.  Clean up the data format (fixing the parsing issue and standardizing the column names using `janitor`)
+
+```{r}
+# use janitor to make first row as column names
+data<-data |> row_to_names(row_number = 1)
+
+# make the column names nicer to work with
+data <- clean_names(data)
+```
+
+4.  Summarize the variables in the dataset. Are there missing values, and if so, should we be worried about them? Is every variable in the format it should be? If not, create new variable(s) that are in the right format.
+
+```{r}
+skim(data)
+```
+
+There are missing values in columns 'contributors_address', 'goods_or_service_desc', 'relationship_to_candidate', 'president_business_manager', 'authorized_representative', and 'ward'. We should worry about the missing values because the missing% is huge, nearly the entire columns are missing. In addition, there are total 13 columns, but 6 columns are missing, hence a problem.
+
+```{r}
+summary(data)
+```
+
+'contribution_amount' should be in numeric format.
+
+```{r}
+# verify there is no char value and all values can be converted to numeric
+# unique(data$contribution_amount)
+
+data<- data|>
+  mutate(contribution_amount_num=as.numeric(contribution_amount))
+```
+
+```{r}
+# list unique values for each column in data
+# sapply(data, unique)
+
+unique(data$goods_or_service_desc)
+```
+
+Two values in 'goods_or_service_desc' are the same thing (musical services at Chowstock fundraiser, musical services Chowstock fundraiser). May need to convert to the same value later if using this column.
+
+Some contributor names are in uppercase letters, hence converting all names related columns into lowercase letters for convenience.
+
+```{r}
+data$contributors_name<-tolower(data$contributors_name)
+data$candidate<-tolower(data$candidate)
+```
+
+```{r}
+# there are duplicates in the data, but these may bot be actual duplicates since many of the columns are missing
+get_dupes(data)
+```
+
+5.  Visually explore the distribution of values of the contributions. What contributions are notable outliers? Do they share a similar characteristic(s)? It may be useful to plot the distribution of contributions without these outliers to get a better sense of the majority of the data.
+
+```{r}
+summary(data$contribution_amount_num)
+```
+
+```{r}
+# because of the large outlier, the small numbers squeezed too closely, 
+# so plot in log scale to see all the numbers easily 
+ggplot(data = data) + 
+  geom_histogram(aes(x = contribution_amount_num)) +
+  scale_x_log10()
+```
+
+```{r}
+# find outliers from boxplot
+outliers<-boxplot(data$contribution_amount_num)
+
+outliers$stats
+```
+
+There is an extremely large amount 508225, and the outliers are outside the extreme whiskers of the boxplot (\<1 or \>1100).
+
+```{r}
+# find common characteristics of outliers
+out<-outliers$out
+summary(out)
+
+data1<- data |>
+  filter(contribution_amount_num %in% out)
+
+# extract the first part of postal code to find a pattern
+data1 <- data1 |>
+  mutate(postal_code_area = word(contributors_postal_code, 1))
+```
+
+```{r}
+# list the 5 most common values in contribution_type_desc, contributor_type_desc,
+# candidate, and postal_code_area within the outliers
+data1 |>
+  group_by(contribution_type_desc) |>
+  summarise(n = n()) |>
+  arrange(-n) |>
+  slice(1:5)
+
+data1 |>
+  group_by(contributor_type_desc) |>
+  summarise(n = n()) |>
+  arrange(-n) |>
+  slice(1:5)
+
+data1 |>
+  group_by(candidate) |>
+  summarise(n = n()) |>
+  arrange(-n) |>
+  slice(1:5)
+
+data1 |>
+  group_by(postal_code_area) |>
+  summarise(n = n()) |>
+  arrange(-n) |>
+  slice(1:5)
+```
+
+Most outliers make monetary contribution and are individual contributor. Tory, John is the most common candidate within the outliers. Most outliers are in the postal area M4W.
+
+```{r}
+# plot histogram after removing outliers
+data2<- data |>
+  filter(!(contribution_amount_num %in% out))
+
+ggplot(data = data2) + 
+  geom_histogram(aes(x = contribution_amount_num))
+
+boxplot(data2$contribution_amount_num)
+
+summary(data2$contribution_amount_num)
+```
+
+Majority of contribution amounts are between 100 and 500.
+
+6.  List the top five candidates in each of these categories:
+
+    -   total contributions
+    -   mean contribution
+    -   number of contributions
+
+    ```{r}
+    data |>
+      group_by(candidate) |>
+      summarise(total_contributions = sum(contribution_amount_num)) |>
+      arrange(-total_contributions) |>
+      slice(1:5)
+
+    data |>
+      group_by(candidate) |>
+      summarise(mean_contributions = mean(contribution_amount_num)) |>
+      arrange(-mean_contributions) |>
+      slice(1:5)
+
+    data |>
+      group_by(candidate) |>
+      summarise(number_of_contributions = n()) |>
+      arrange(-number_of_contributions) |>
+      slice(1:5)
+    ```
+
+7.  Repeat 6 but without contributions from the candidates themselves.
+
+```{r}
+data |>
+  filter(contributors_name != candidate) |>
+  group_by(candidate) |>
+  summarise(total_contributions = sum(contribution_amount_num)) |>
+  arrange(-total_contributions) |>
+  slice(1:5)
+
+data |>
+  filter(contributors_name != candidate) |>
+  group_by(candidate) |>
+  summarise(mean_contributions = mean(contribution_amount_num)) |>
+  arrange(-mean_contributions) |>
+  slice(1:5)
+
+data |>
+  filter(contributors_name != candidate) |>
+  group_by(candidate) |>
+  summarise(number_of_contributions = n()) |>
+  arrange(-number_of_contributions) |>
+  slice(1:5)
+```
+
+8.  How many contributors gave money to more than one candidate?
+
+```{r}
+data |>
+  group_by(contributors_name) |>
+  summarise(number_of_candidate=n_distinct(candidate)) |>
+  filter(number_of_candidate>1) |>
+  count()
+```
+
+200 contributors gave money to more than one candidate.
