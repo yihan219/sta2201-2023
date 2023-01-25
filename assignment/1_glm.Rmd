@@ -1,0 +1,111 @@
+---
+title: "STA2201H Winter 2023 Assignment 1"
+output: 
+  pdf_document:
+    number_sections: true
+fontsize: 11pt
+---
+
+**Due:** 11:59pm, 3 February 2023
+
+**What to hand in:** .qmd or .Rmd file and the compiled pdf
+
+**How to hand in:** Submit files via Quercus
+
+# Overdispersion
+
+Suppose that the conditional distribution of outcome $Y$ given an unobserved variable $\theta$ is Poisson, with a mean and variance $\mu\theta$, so 
+
+$$
+Y|\theta \sim  \text{Poisson}(\mu\theta)
+$$
+
+a) Assume $E(\theta) = 1$ and $Var(\theta) = \sigma^2$. Using the laws of total expectation and total variance, show $E(Y) = \mu$ and $Var(Y) = \mu (1+ \mu\sigma^2)$. 
+b) Assume $\theta$ is Gamma distributed with $\alpha$ and $\beta$ as shape and scale parameters, respectively. Show the unconditional distribution of $Y$ is Negative Binomial.
+c) In order for $E(Y) = \mu$ and $Var(Y) = \mu (1+ \mu\sigma^2)$, what must $\alpha$ and $\beta$ equal?
+
+
+\newpage
+
+# Hurricanes
+
+In 2014 the following paper was published in PNAS:
+
+> Jung, K., Shavitt, S., Viswanathan, M., & Hilbe, J. M. (2014). Female hurricanes are deadlier than male hurricanes. Proceedings of the National Academy of Sciences, 111(24), 8782-8787.
+
+As the title suggests, the paper claimed that hurricanes with female names have caused a greater loss of life. In this question you will be investigating the data set used for the regression part of their analysis. 
+
+You can download the data from the paper's supporting information here: https://www.pnas.org/doi/10.1073/pnas.1402786111#supplementary-materials
+
+You should skim the whole paper but you will probably find it useful to read the sections on the Archival Study in the most depth (both in the main text and 'Materials and Methods' section).
+
+a) Create three graphs in ggplot that help to visualize patterns in deaths by femininity, minimum pressure, and damage. Discuss what you observe based on your visualizations. 
+```{r}
+library(readxl)
+data<-read_excel("pnas.1402786111.sd01.xlsx")
+data<-data|>filter(!row_number()>92)
+```
+```{r}
+library(tidyverse)
+ggplot(data=data)+
+  geom_histogram(aes(x = alldeaths))+
+  facet_grid(~Gender_MF)
+
+data |>
+  ggplot(aes(x = `Minpressure_Updated 2014`, y=alldeaths))+
+  geom_line()
+
+data |>
+  ggplot(aes(x = NDAM, y=alldeaths))+
+  geom_line()
+```
+1) We saw a few large number of deaths greater than 100 in female hurricanes (1 being female), but not in male hurricanes, this suggests that female hurricanes cause more deaths.  
+2) As the minimum pressure increases from 0 to 925, the number of deaths decreases significantly. But as the minimum pressure increases from 925 onward, the number of deaths fluctuates but overall decreases. Overall, as the minimum pressure increases, the number of deaths decreases.  
+3) As the damage amount increases from 0 to 20000, the number of deaths fluctuates but overall increases. When the damage increases from 20000 onward, there is a steady increase in the number of deaths.
+
+b) Run a Poisson regression with `deaths` as the outcome and `femininity` as the explanatory variable. Interpret the resulting coefficient estimate. Check for overdispersion. If it is an issue, run a quasi-Poisson regression with the same variables. Interpret your results. 
+```{r}
+model_poisson<-glm(alldeaths~Gender_MF, family=poisson, data=data)
+#model_quasi_poisson<-glm(alldeaths~Gender_MF, family=quasipoisson, data=data)
+
+summary(model_poisson)
+#summary(model_quasi_poisson)
+```
+Compared to male hurricanes, female hurricanes have $exp(0.51234)=1.669193$ times more fatality rate.
+
+```{r}
+# test for overdispersion
+sum()
+```
+
+c) Reproduce Model 4 (as described in the text and shown in Table S2).[^1] Report the estimated effect of femininity on deaths assuming a hurricane with median pressure and damage ratings. 
+d) Using Model 4, predict the number of deaths caused by Hurricane Sandy. Interpret your results. 
+e) Describe at least two strengths and two weaknesses of this paper, focusing on the archival analysis. What was done well? What needed improvement?
+f) Are you convinced by the results? If you are, explain why. If you're not, describe what additional data and/or analyses you would like to see to further test the author's hypothesis. 
+
+[^1]: I was able to reproduce the coefficient estimates using the data available but the standard errors were slightly different, so don't worry if that is what you find. 
+
+\newpage
+
+# Vaccinations
+
+This question relates to COVID-19 vaccination rates in the United States. We are interested in exploring factors that are associated with differences in vaccine coverage by US county. 
+
+- You can download the latest data on vaccination coverage here: https://data.cdc.gov/Vaccinations/COVID-19-Vaccinations-in-the-United-States-County/8xkx-amqh/data. Note that this is updated most days so depending on when you download it, it might be slightly different from others (that's okay). For the purposes of the assignment, please consider data from the 11th of January 2023. Also note that on the same webpage you should be able to find a data dictionary. We will be interested in people who have completed a primary vaccine series (have second dose of a two-dose vaccine or one dose of a single-dose vaccine), which refers to columns that have the `Series_Complete` prefix. 
+- The class repo has a dataset `acs` that contain a range of different demographic, socioeconomic, and health variables by county. These were obtained from the American Community Survey (ACS) via the R package `tidycensus`. For reference, the extraction code can be found in the repo (`acs.R`)
+
+
+a) Perform some exploratory data analysis (EDA) using a dataset combining the vaccination and ACS data, and summarize your observations with the aid of 3-4 key tables or graphs. 
+b) Build a regression model at the county level to help investigate patterns in the full vaccination rate for the population aged 18+ (that is, people aged 18+ who have completed a primary vaccine series). There is no one right answer here, but you should justify the outcome measure you are using (e.g. counts, proportions, rates, etc) and your distributional assumptions about the outcome measure (e.g. binary, poisson, normal, etc). You should also discuss briefly your model building strategy; what covariates you considered and why (motivated by your EDA)[^2], and how the candidate model was chosen. Interpret your findings, including visualizations where appropriate. 
+c) Use your model from b) to predict the proportion of the population aged 18+ in Ada County, Idaho. Briefly discuss how good you think this prediction is, and why. 
+d) Give a brief summary of your analysis. What other variables may be of interest to investigate in future?
+e) Now consider the situation of analysing vaccination rates at the **state** level. Consider the three following options:  
+    1) Regression at the state level, outcome used is the total population 18+ fully vaccinated 
+    2) Regression at the state level, outcome used is the average of the county level full vaccination rates of 18+ population 
+    3) Regression at the county level, outcome used is the total population 18+ fully vaccinated, and include as a covariate a categorical variable (fixed effect) which indicates which state a county is in.
+    
+> Without performing these regressions, briefly discuss how you think these three approaches would differ in terms of the granularity of information used and the type of outcome measure. In your opinion which is the most appropriate analysis, or does it depend on the question being asked?
+
+[^2]: Note that the vaccines dataset also has a `Metro` variable which you are welcome to use in your analyses.
+
+
